@@ -3,6 +3,7 @@ import hashlib
 import math
 from typing import List
 from typing import Dict
+from typing import Union
 from typing import Optional
 from .objects import Position
 from .objects import Circle
@@ -15,6 +16,13 @@ from .objects import TimingPoint
 from .constants import ObjectType
 from .constants import OSU_FILE_HEADER
 from .constants import CURVE_TYPES
+
+
+def osu_float(f):  # osu doesn't keep decimal 0s
+    f = str(f)
+    if f[-1:-3:-1] == "0.":
+        return f[0:-2]
+    return f
 
 
 class OsuFile:
@@ -80,7 +88,7 @@ class OsuFile:
         self.colours: Dict[str, tuple] = {}
 
         # HitObjects section.
-        self.hit_objects: List[HitObject] = []
+        self.hit_objects: List[Union[HitObject, Circle, Slider, Spinner]] = []
 
         # External data.
         self.md5: str = ""
@@ -92,6 +100,11 @@ class OsuFile:
         self.ncircles: int = 0
         self.nsliders: int = 0
         self.nspinners: int = 0
+
+    def save_file(self, path):
+        """Saves parsed beatmap to .osu file"""
+        with open(path, "r") as f:
+            f.write(self.unparse_file())
 
     def parse_file(self):
         """Parses sections and set them to class variables."""
@@ -130,6 +143,36 @@ class OsuFile:
         # Return self as some people would want to make one line parsing.
         return self
 
+    def unparse_file(self):
+        newline = "\n"
+        data = f"""osu file format v14
+
+[General]
+{self.unparse_general()}
+
+[Editor]
+{self.unparse_editor()}
+
+[Metadata]
+{self.unparse_metadata()}
+
+[Difficulty]
+{self.unparse_difficulty()}
+
+[Events]
+{self.unparse_events()}
+
+[TimingPoints]
+{self.unparse_timingpoints()}
+
+[Colours]
+{self.unparse_colours()}
+
+[HitObjects]
+{self.unparse_hit_objects()}
+"""
+        return data
+
     def general_parser(self, line: str) -> None:
         """Parses [General] header data."""
         if line.startswith("AudioFilename"):
@@ -154,6 +197,17 @@ class OsuFile:
             self.widescreen_storyboard = "1" == line.split(
                 "WidescreenStoryboard:")[1].strip()
 
+    def unparse_general(self):
+        return f"""AudioFilename: {self.audio_filename}
+AudioLeadIn: {self.audio_lead_in}
+PreviewTime: {self.preview_time}
+Countdown: {self.countdown}
+SampleSet: {self.sample_set}
+StackLeniency: {self.stack_leniency}
+Mode: {self.mode}
+LetterboxInBreaks: {int(self.letterbox_in_breaks)}
+WidescreenStoryboard: {int(self.widescreen_storyboard)}"""
+
     def editor_parser(self, line: str) -> None:
         """Parses [Editor] header data."""
         if line.startswith("DistanceSpacing"):
@@ -165,6 +219,12 @@ class OsuFile:
             self.grid_size = int(line.split("GridSize:")[1].strip())
         elif line.startswith("TimelineZoom"):
             self.timeline_zoom = float(line.split("TimelineZoom:")[1].strip())
+
+    def unparse_editor(self):
+        return f"""DistanceSpacing: {self.distance_spacing}
+BeatDivisor: {self.beat_divisor}
+GridSize: {self.grid_size}
+TimelineZoom: {self.timeline_zoom}"""
 
     def metadata_parser(self, line: str) -> None:
         """Parses [Metadata] header data."""
@@ -189,6 +249,18 @@ class OsuFile:
         elif line.startswith("BeatmapSetID"):
             self.beatmap_set_id = int(line.split("BeatmapSetID:")[1].strip())
 
+    def unparse_metadata(self):
+        return f"""Title:{self.title}
+TitleUnicode:{self.title_unicode}
+Artist:{self.artist}
+ArtistUnicode:{self.artist_unicode}
+Creator:{self.creator}
+Version:{self.version}
+Source:{self.source}
+Tags: {self.tags}
+BeatmapID:{self.beatmap_id}
+BeatmapSetID:{self.beatmap_set_id}"""
+
     def difficulty_parser(self, line: str) -> None:
         """Parses [Difficulty] header data."""
         if line.startswith("HPDrainRate"):
@@ -205,6 +277,14 @@ class OsuFile:
         elif line.startswith("SliderTickRate"):
             self.slider_tick_rate = float(
                 line.split("SliderTickRate:")[1].strip())
+
+    def unparse_difficulty(self):
+        return f"""HPDrainRate:{osu_float(self.hp)}
+CircleSize:{osu_float(self.cs)}
+OverallDifficulty:{osu_float(self.od)}
+ApproachRate:{osu_float(self.ar)}
+SliderMultiplier:{osu_float(self.slider_multiplier)}
+SliderTickRate:{osu_float(self.slider_tick_rate)}"""
 
     def events_parser(self, line: str) -> None:
         """Parses [Events] header data."""
@@ -225,6 +305,19 @@ class OsuFile:
 
             elif data and data[0] == "2":
                 self.break_times.append([int(data[1]), int(data[2])])
+
+    def unparse_events(self):
+        newline = "\n"
+        return f"""//Background and Video events
+0,0,"{self.background_file}",0,0
+//Break Periods
+{newline.join([",".join(map(str, [2]+i)) for i in self.break_times])}
+//Storyboard Layer 0 (Background)
+//Storyboard Layer 1 (Fail)
+//Storyboard Layer 2 (Pass)
+//Storyboard Layer 3 (Foreground)
+//Storyboard Layer 4 (Overlay)
+//Storyboard Sound Samples"""
 
     # Taken from https://github.com/nojhamster/osu-parser/blob/539b73e087d46de7aa7159476c7ea6ac50983c97/index.js#L99
     def timingpoints_parser(self, line: str) -> None:
@@ -252,12 +345,33 @@ class OsuFile:
 
         self.timing_points.append(point)
 
+    def unparse_timingpoints(self):
+        lines = []
+        for timingpoint in self.timing_points:
+            attributes = [
+                osu_float(timingpoint.offset),
+                osu_float(timingpoint.beat_length),
+                osu_float(timingpoint.time_signature),
+                osu_float(timingpoint.sample_set_id),
+                osu_float(timingpoint.custom_sample_index),
+                osu_float(timingpoint.sample_volume),
+            ]
+            if timingpoint.timing_change is not None:
+                attributes.append(str(int(timingpoint.timing_change)))
+            if timingpoint.kiai_time_active is not None:
+                attributes.append(str(int(timingpoint.kiai_time_active)))
+            lines.append(",".join(attributes))
+        return "\n".join(lines)
+
     def colours_parser(self, line: str) -> None:
         """Parses [Colours] header data."""
         name, rgb_colours = line.split(" : ")
         rgb = rgb_colours.split(",")
 
         self.colours |= {name: (int(rgb[0]), int(rgb[1]), int(rgb[2]))}
+
+    def unparse_colours(self):
+        return "\n".join([f"k : {','.join(map(str, v))}" for k, v in self.colours.items()]) if self.colours else ""
 
     # Also taken from https://github.com/nojhamster/osu-parser/blob/539b73e087d46de7aa7159476c7ea6ac50983c97/index.js#L134
     def hitobjects_parser(self, line: str) -> None:
@@ -268,6 +382,7 @@ class OsuFile:
         sound = int(data[4])
         new_combo = (_type & ObjectType.NEW_COMBO) == 4
         pos = Position(int(data[0]), int(data[1]))
+        colour_hax = (_type & int("01110000", base=2)) >> 4
 
         if _type & ObjectType.CIRCLE:
             self.ncircles += 1
@@ -275,6 +390,7 @@ class OsuFile:
                 pos=pos,
                 start_time=int(data[2]),
                 new_combo=new_combo,
+                colour_hax=colour_hax,
                 sound_enum=sound
             )
             if len(data) > 5:
@@ -285,6 +401,7 @@ class OsuFile:
                 pos=pos,
                 start_time=int(data[2]),
                 new_combo=new_combo,
+                colour_hax=colour_hax,
                 sound_enum=sound,
                 end_time=int(data[5])
             )
@@ -318,16 +435,15 @@ class OsuFile:
                 sound_edge_enum = None
                 if i < len(edge_additions):
                     additions = self.parse_addition(edge_additions[i])
-
                 if i < len(edge_sounds):
                     sound_edge_enum = edge_sounds[i]
-
                 edges.append(Edge(sound_edge_enum, additions))
 
             hitobject = Slider(
                 pos=Position(int(data[0]), int(data[1])),
                 start_time=int(data[2]),
                 new_combo=new_combo,
+                colour_hax=colour_hax,
                 sound_enum=sound,
                 repeat_count=int(data[6]),
                 pixel_length=float(data[7]),
@@ -341,19 +457,69 @@ class OsuFile:
             if len(data) > 10:
                 hitobject.additions = self.parse_addition(data[10])
         else:
-            # Might be some hitobject I dont know about..
+            # Might be some hitobject I don't know about..
             hitobject = HitObject(
                 pos=Position(int(data[0]), int(data[1])),
                 start_time=int(data[2]),
                 new_combo=new_combo,
+                colour_hax=colour_hax,
                 sound_enum=sound
             )
 
         self.total_hits += 1
         self.hit_objects.append(hitobject)
 
+    def unparse_hit_objects(self):
+        lines = []
+        for hit_object in self.hit_objects:
+            if type(hit_object) is Circle:
+                data = [
+                    str(hit_object.pos.x),
+                    str(hit_object.pos.y),
+                    str(hit_object.start_time),
+                    str(int(ObjectType.CIRCLE) + int(hit_object.new_combo)*int(ObjectType.NEW_COMBO) + (hit_object.colour_hax << 4)),
+                    str(hit_object.sound_enum),
+                ]
+                if hit_object.additions:
+                    data.append(self.unparse_addition(hit_object))
+                lines.append(",".join(data))
+            elif type(hit_object) is Slider:
+                data = [
+                    str(hit_object.pos.x),
+                    str(hit_object.pos.y),
+                    str(hit_object.start_time),
+                    str(int(ObjectType.SLIDER) + int(hit_object.new_combo)*int(ObjectType.NEW_COMBO) + (hit_object.colour_hax << 4)),
+                    str(hit_object.sound_enum),
+                    "|".join([hit_object.curve_type[0]] + [str(point.x) + ":" + str(point.y) for point in hit_object.points]),
+                    str(hit_object.repeat_count),
+                    osu_float(hit_object.pixel_length),
+                ]
+                if hit_object.edges and hit_object.edges[0].sound_types != '':
+                    edge_sounds = [edge.sound_types for edge in hit_object.edges]
+                    data.append("|".join(edge_sounds))
+                    edge_sets = [self.unparse_edge_addition(edge) for edge in hit_object.edges]
+                    data.append("|".join(edge_sets))
+
+                if hit_object.additions:
+                    data.append(self.unparse_addition(hit_object))
+                lines.append(",".join(data))
+            elif type(hit_object) is Spinner:
+                data = [
+                    str(hit_object.pos.x),
+                    str(hit_object.pos.y),
+                    str(hit_object.start_time),
+                    str(int(ObjectType.SPINNER) + int(hit_object.new_combo)*int(ObjectType.NEW_COMBO) + (hit_object.colour_hax << 4)),
+                    str(hit_object.sound_enum),
+                    str(hit_object.end_time),
+                ]
+                if hit_object.additions:
+                    data.append(self.unparse_addition(hit_object))
+                lines.append(",".join(data))
+        return "\n".join(lines)
+
+
     def parse_addition(self, line: str) -> Optional[Additions]:
-        """Parses addictional hitobject data."""
+        """Parses additional hitobject data."""
         if not line:
             return None
 
@@ -379,6 +545,33 @@ class OsuFile:
 
         additional = Additions(**addition)
         return additional
+
+    def unparse_addition(self, hit_object: Union[Circle, Slider, Spinner]):
+        samples = {
+            'Normal': "1",
+            "Soft": "2",
+            "Drum": "3",
+        }
+        data = []
+        try:
+            data.append(samples.get(hit_object.additions.normal, "0"))
+            data.append(samples.get(hit_object.additions.additional, "0"))
+            data.append(str(hit_object.additions.custom_sample_index))
+            data.append(str(hit_object.additions.volume))
+            data.append(str(hit_object.additions.filename))
+        except KeyError:
+            pass
+        except AttributeError:
+            pass
+        return ":".join(data)
+
+    def unparse_edge_addition(self, edge):
+        samples = {
+            'Normal': "1",
+            "Soft": "2",
+            "Drum": "3",
+        }
+        return samples.get(edge.additions.normal, "0") + ":" + samples.get(edge.additions.additional, "0")
 
     def get_timing_point(self, offset: int) -> TimingPoint:
         """Finds a timing point with given offset."""

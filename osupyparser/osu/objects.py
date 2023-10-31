@@ -4,11 +4,13 @@ from typing import Optional
 from typing import Any
 from dataclasses import dataclass
 
+
 @dataclass
 class Position:
     """A (x, y) coordinates class."""
     x: int
     y: int
+
 
 @dataclass
 class Additions:
@@ -19,11 +21,13 @@ class Additions:
     volume: Optional[int] = 0
     filename: Optional[Any] = None
 
+
 @dataclass
 class Edge:
     """A additional class for slider edges."""
     sound_types: List[str]
     additions: Optional[Additions]
+
 
 @dataclass
 class TimingPoint:
@@ -39,13 +43,16 @@ class TimingPoint:
     velocity: Optional[float] = None
     bpm: Optional[float] = None
 
+
 @dataclass
 class HitObject:
     """Subclass representing standalone hitobject."""
     pos: Position
     start_time: int
     new_combo: bool
+    colour_hax: int  # https://osu.ppy.sh/wiki/en/Client/File_formats/osu_%28file_format%29#:~:text=colour%20hax
     sound_enum: int
+
 
 @dataclass
 class Circle(HitObject):
@@ -54,17 +61,19 @@ class Circle(HitObject):
     # but I wanted it to be its own type.
     additions: Optional[Additions] = None
 
+
 @dataclass
 class Spinner(HitObject):
     """Represents one spinner object."""
     end_time: int
     additions: Optional[Additions] = None
 
+
 @dataclass
 class Slider(HitObject):
     """Represents one slider object."""
     repeat_count: int
-    pixel_length: int
+    pixel_length: float
     edges: list[Edge]
     points: List[Position]
     duration: int
