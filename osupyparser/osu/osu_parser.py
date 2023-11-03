@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import hashlib
 import math
+import os
 from typing import List
 from typing import Dict
 from typing import Union
@@ -643,3 +646,52 @@ SliderTickRate:{osu_float(self.slider_tick_rate)}"""
             self.play_time = math.floor(last_obj.start_time / 1000)
             self.drain_time = math.floor(
                 (last_obj.start_time - first_obj.start_time - self.break_time) / 1000)
+
+    def __add__(self, other: OsuFile):
+        """concatenates the "other" beatmap to the end of self"""
+        dir_name = f"{self.title}+{other.title}"
+        map_path = os.path.join(dir_name, "map.osu")
+        audio_path = os.path.join(dir_name, "audio.mp3")
+        try:
+            os.mkdir(dir_name)
+        except FileExistsError:
+            pass
+        with open(os.path.join(map_path), "w") as f:
+            pass
+        new_beatmap = OsuFile(map_path)
+
+        # Generate new audio
+        import ffmpeg  # ffmpeg-python
+        audio1_filename = os.path.join(os.path.dirname(self.__file_path), self.audio_filename)
+        print(audio1_filename)
+        audio2_filename = os.path.join(os.path.dirname(other.__file_path), other.audio_filename)
+        print(audio2_filename)
+        audio1 = ffmpeg.input(audio1_filename)
+        audio2 = ffmpeg.input(audio2_filename)
+        new_audio = ffmpeg.concat(audio1, audio2)
+
+        new_audio.output(os.path.join(dir_name, 'audio.mp4'))
+
+        print(self.audio_filename)
+        audio1_length = ffmpeg.probe(audio1_filename)["format"]["duration"]
+
+        print(f"{audio1_length=}")
+
+        new_beatmap.timing_points = self.timing_points
+        for timing_point in other.timing_points:
+            timing_point.offset += audio1_length
+            new_beatmap.timing_points.append()
+
+        # Header of file.
+        new_beatmap.file_version = self.file_version
+
+        # General section.
+        new_beatmap.audio_filename: str = ""
+        self.audio_lead_in: int = 0
+        self.preview_time: int = 0
+        self.countdown: int = 0
+        self.sample_set: str = ""
+        self.stack_leniency: float = 0.0
+        self.mode: int = 0
+        self.letterbox_in_breaks: bool = False
+        self.widescreen_storyboard: bool = False
